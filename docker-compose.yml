@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  telegram_bot:
+    image: python:3.10-slim  # Обновляем до последнего стабильного Python 3.10 для совместимости с новыми пакетами
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - data_volume:/app/data
+    command: >
+      bash -c "pip install --no-cache-dir -r requirements.txt && 
+               python -m main"
+    env_file:
+      - .env
+    # Добавляем ограничения ресурсов для контейнера
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    # Добавляем перезапуск политики для улучшения устойчивости
+    restart: unless-stopped
+
+volumes:
+  data_volume:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/data
+      o: bind
+
+# Добавляем сеть для изоляции сервиса
+networks:
+  default:
+    name: telegram_bot_network

@@ -1,0 +1,63 @@
+# Временные файлы Python
+*.pyc
+*.pyo
+*~
+__pycache__/
+
+# Файлы логов
+*.log
+
+# Базы данных
+*.db
+*.sqlite3
+
+# Виртуальное окружение Python
+venv/
+env/
+.venv/
+
+# Файлы конфигурации
+.env
+config.py
+
+# Файлы с зависимостями
+#requirements.txt - раскомментировать, если требуется
+
+# Файлы IDE
+.vscode/
+.idea/
+
+# Папки с тестами
+test/
+tests/
+
+# Файлы сборки
+build/
+dist/
+*.egg-info/
+
+# Кэш pip
+pip-cache/
+
+# Файлы, специфичные для бота
+bot.db
+user_ids.json
+
+# Файлы, связанные с Docker
+.dockerignore
+.docker/
+
+# Файлы для macOS
+.DS_Store
+
+# Файлы для Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Файлы покрытия тестами
+.coverage
+htmlcov/
+
+# Тестовые файлы
+*.test.py
