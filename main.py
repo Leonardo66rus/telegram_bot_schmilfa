@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import logging
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 from dotenv import load_dotenv
 
@@ -60,7 +60,7 @@ def create_reply_markup(keyboard):
 
 # Оптимизация клавиатур для постоянного отображения
 main_keyboard = [["ATS", "ETS"]]
-game_keyboard = [["Гайды", "Моды"], ["Обзор патча", "Социальные сети"], ["Главное меню"]]
+game_keyboard = [["Гайды", "Моды"], ["Обзор актуального патча", "Социальные сети"], ["Главное меню"]]
 guides_keyboard = [["Гайд для новичка"], ["Включить консоль и свободную камеру"], ["Консольные команды"], ["Конвой на 8+ человек"], ["Назад"]]
 back_keyboard = [["Назад"]]
 
@@ -103,9 +103,25 @@ async def show_guides(update: Update, context: CallbackContext) -> None:
 async def show_social(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     if not user.is_bot:
-        social_text = load_text('data/social/social.txt')
-        reply_markup = create_reply_markup(back_keyboard)
-        await update.message.reply_text(social_text, reply_markup=reply_markup)
+        social_text = "Добро пожаловать в наши социальные сети! 📱\n\nОставайтесь на связи и следите за всеми важными обновлениями:"
+
+        # Создаем инлайн-кнопки для социальных сетей с эмодзи
+        social_buttons = [
+            [InlineKeyboardButton("✈️ Подписаться в Telegram", url="https://t.me/banka_alivok")],
+            [InlineKeyboardButton("📺 Подписаться на YouTube", url="https://www.youtube.com/user/TheAlive55?sub_confirmation=1")],
+            [InlineKeyboardButton("📺 Подписаться на Дзен", url="https://dzen.ru/thealive55")]
+
+        ]
+
+        # Используем ReplyKeyboardMarkup для кнопки "Назад"
+        reply_keyboard = back_keyboard  # Уже определено как [['Назад']]
+        reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+        # Отправляем сообщение с инлайн-кнопками для социальных сетей
+        await update.message.reply_text(social_text, reply_markup=InlineKeyboardMarkup(social_buttons))
+        # Отправляем отдельное сообщение для кнопки "Назад"
+        await update.message.reply_text("Нажмите 'Назад' для возврата в предыдущее меню:", reply_markup=reply_markup)
+
         context.user_data['previous_menu'] = context.user_data.get('current_menu', 'game_menu')
         context.user_data['current_menu'] = 'social'
     else:
@@ -117,7 +133,7 @@ async def show_patch(update: Update, context: CallbackContext, game: str) -> Non
         patch_file = f'data/patches/patch_{game.lower()}.txt'
         patch_text = load_text(patch_file)
         if "Файл не найден." in patch_text or "Произошла ошибка" in patch_text:
-            patch_text = f"Обзор патча для {game} не найден."
+            patch_text = f"Обзор актуального патча для {game} не найден."
         reply_markup = create_reply_markup(back_keyboard)
         await update.message.reply_text(patch_text, reply_markup=reply_markup)
         context.user_data['previous_menu'] = context.user_data.get('current_menu', 'game_menu')
@@ -202,14 +218,14 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
         current_menu = context.user_data.get('current_menu', '')
         game = "ATS" if "ats" in current_menu else "ETS" if "ets" in current_menu else None
 
-        if update.message.text in ["Гайды", "Моды", "Социальные сети", "Обзор патча"] and game:
+        if update.message.text in ["Гайды", "Моды", "Социальные сети", "Обзор актуального патча"] and game:
             if update.message.text == "Гайды":
                 await show_guides(update, context)
             elif update.message.text == "Моды":
                 await show_mods(update, context)
             elif update.message.text == "Социальные сети":
                 await show_social(update, context)
-            elif update.message.text == "Обзор патча":
+            elif update.message.text == "Обзор актуального патча":
                 await show_patch(update, context, game)
         elif update.message.text == "Назад":
             await go_back(update, context)
@@ -240,7 +256,7 @@ async def start(update: Update, context: CallbackContext) -> None:
 # Добавление обработчиков
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(ATS|ETS)$'), handle_game_selection))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Гайды|Моды|Обзор патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек)$'), handle_mods_selection))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Гайды|Моды|Обзор актуального патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек)$'), handle_mods_selection))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ignore_text_input))
 
 # Запуск
