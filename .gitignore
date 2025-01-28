@@ -6,38 +6,59 @@ __pycache__/
 
 # Файлы логов
 *.log
+*.log.*
 
 # Базы данных
 *.db
 *.sqlite3
+*.sqlite
 
 # Виртуальное окружение Python
 venv/
 env/
 .venv/
+ENV/
+env.bak/
+venv.bak/
 
 # Файлы конфигурации
 .env
+.env.*
 config.py
+config.ini
+secrets.ini
 
 # Файлы с зависимостями
-#requirements.txt - раскомментировать, если требуется
+# requirements.txt - раскомментировать, если требуется
+Pipfile
+Pipfile.lock
+poetry.lock
+pyproject.toml
 
 # Файлы IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
 
 # Папки с тестами
 test/
 tests/
+*.test.py
 
 # Файлы сборки
 build/
 dist/
 *.egg-info/
+*.egg
+*.whl
 
 # Кэш pip
 pip-cache/
+.pip-cache/
+.python-version
 
 # Файлы, специфичные для бота
 bot.db
@@ -46,18 +67,45 @@ user_ids.json
 # Файлы, связанные с Docker
 .dockerignore
 .docker/
+docker-compose.yml
+docker-compose.override.yml
 
 # Файлы для macOS
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
 
 # Файлы для Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+[Tt]humbs.db
 
 # Файлы покрытия тестами
 .coverage
 htmlcov/
+.coverage.*
+.pytest_cache/
 
-# Тестовые файлы
-*.test.py
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Файлы для других языков и инструментов
+node_modules/
+bower_components/
+*.min.js
+*.min.css
+*.map
+
+# Файлы для CI/CD
+.circleci/
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Файлы для редакторов
+.ropeproject/
+.history/
+.session
