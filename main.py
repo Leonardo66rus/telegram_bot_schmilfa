@@ -151,26 +151,25 @@ async def show_social(update: Update, context: CallbackContext) -> None:
     if not user.is_bot:
         social_text = "Добро пожаловать в наши социальные сети! 📱\n\nОставайтесь на связи и следите за всеми важными обновлениями:"
 
-        # Создаем инлайн-кнопки для социальных сетей с эмодзи
         social_buttons = [
             [InlineKeyboardButton("✈️ Подписаться в Telegram", url="https://t.me/banka_alivok")],
             [InlineKeyboardButton("📺 Подписаться на YouTube", url="https://www.youtube.com/user/TheAlive55?sub_confirmation=1")],
             [InlineKeyboardButton("📺 Подписаться на Дзен", url="https://dzen.ru/thealive55")]
         ]
 
-        # Используем ReplyKeyboardMarkup для кнопки "Назад"
-        reply_keyboard = back_keyboard  # Уже определено как [['Назад']]
+        # Убедитесь, что у нас есть кнопка "Назад" в клавиатуре
+        reply_keyboard = back_keyboard  # [['Назад']]
         reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
 
-        # Отправляем сообщение с инлайн-кнопками для социальных сетей
         await update.message.reply_text(social_text, reply_markup=InlineKeyboardMarkup(social_buttons))
-        # Отправляем отдельное сообщение для кнопки "Назад"
-        await update.message.reply_text("Нажмите 'Назад' для возврата в предыдущее меню:", reply_markup=reply_markup)
+        # Отправляем дополнительное сообщение с клавиатурой для навигации назад
+        await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
         context.user_data['previous_menu'] = context.user_data.get('current_menu', 'game_menu')
         context.user_data['current_menu'] = 'social'
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
+
 
 async def show_patch(update: Update, context: CallbackContext, game: str) -> None:
     user = update.message.from_user
@@ -248,7 +247,10 @@ async def go_back(update: Update, context: CallbackContext) -> None:
         previous_menu = context.user_data.get('previous_menu', 'main_menu')
         current_menu = context.user_data.get('current_menu', '')
 
-        if current_menu == 'convoy':
+        if current_menu == 'social':
+            game = context.user_data.get('selected_game', 'ATS')
+            await game_menu(update, context, game)
+        elif current_menu == 'convoy':
             await show_guides(update, context)
         elif previous_menu == 'start_menu':
             await main_menu(update, context)
