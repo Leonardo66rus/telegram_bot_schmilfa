@@ -63,8 +63,9 @@ main_keyboard = [["ATS", "ETS 2"]]
 game_keyboard = [["Гайды", "Моды"], ["Обзор актуального патча", "Социальные сети"], ["Назад"]]
 ets_game_keyboard = [["Гайды", "Моды"], ["Обзор актуального патча", "Социальные сети"], ["Сборки карт"], ["Назад"]]
 map_packs_keyboard = [["Золотая сборка Русских карт"], ["Назад"]]
-admin_keyboard = [["Статистика"], ["Главное меню"]]  # Новая клавиатура для админов
+admin_keyboard = [["Статистика"], ["Главное меню"]]
 guides_keyboard = [["Гайд для новичка"], ["Включить консоль и свободную камеру"], ["Консольные команды"], ["Конвой на 8+ человек"], ["Назад"]]
+mods_keyboard = [["Таблица модов", "Талисман 'Шмилфа' в кабину"], ["Назад"]]
 back_keyboard = [["Назад"]]
 
 async def main_menu(update: Update, context: CallbackContext) -> None:
@@ -78,7 +79,7 @@ async def main_menu(update: Update, context: CallbackContext) -> None:
         if user.id in ADMIN_IDS:
             keyboard.append(["Админ"])
         reply_markup = create_reply_markup(keyboard)
-        await update.message.reply_text("Выберите игру или функцию:", reply_markup=reply_markup)
+        await update.message.reply_text("Выберите игру :", reply_markup=reply_markup)
         context.user_data['previous_menu'] = 'start_menu'
         context.user_data['current_menu'] = 'main_menu'
     else:
@@ -99,11 +100,39 @@ async def admin_menu(update: Update, context: CallbackContext) -> None:
 async def show_mods(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     if not user.is_bot:
-        mods_text = load_text('data/mods/mods.txt')
-        reply_markup = create_reply_markup(back_keyboard)
-        await update.message.reply_text(mods_text, reply_markup=reply_markup)
+        reply_markup = create_reply_markup(mods_keyboard)
+        await update.message.reply_text("Выберите опцию:", reply_markup=reply_markup)
         context.user_data['previous_menu'] = context.user_data.get('current_menu', 'game_menu')
         context.user_data['current_menu'] = 'mods'
+    else:
+        await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
+
+async def show_mods_table(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    if not user.is_bot:
+        mods_table_text = load_text('data/mods/mods_table.txt')
+
+        # Создаем инлайн-кнопку для ссылки
+        mods_link_button = InlineKeyboardMarkup([[InlineKeyboardButton("Ссылка на моды", url="https://clck.ru/Xxs42")]])
+
+        # Отправляем текст с инлайн-клавиатурой для ссылки
+        await update.message.reply_text(mods_table_text, reply_markup=mods_link_button)
+
+        context.user_data['previous_menu'] = 'mods'
+        context.user_data['current_menu'] = 'mods_table'
+    else:
+        await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
+
+async def show_schmilfa_in_cabin(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    if not user.is_bot:
+        selected_game = context.user_data.get('selected_game', 'ATS')  # По умолчанию ATS
+        schmilfa_file = f'data/mods/schmilfa_in_cabin_{selected_game.lower()}.txt'  # Формируем путь к файлу
+        schmilfa_text = load_text(schmilfa_file)  # Загружаем текст из файла
+        reply_markup = create_reply_markup(back_keyboard)
+        await update.message.reply_text(schmilfa_text, reply_markup=reply_markup)
+        context.user_data['previous_menu'] = 'mods'
+        context.user_data['current_menu'] = 'schmilfa_in_cabin'
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
@@ -206,6 +235,7 @@ async def handle_game_selection(update: Update, context: CallbackContext) -> Non
     if not user.is_bot:
         game = update.message.text
         if game in ["ATS", "ETS 2"]:
+            context.user_data['selected_game'] = game  # Устанавливаем выбранную игру в user_data
             await game_menu(update, context, game)
         elif user.id in ADMIN_IDS and game == "Админ":
             await admin_menu(update, context)
@@ -243,9 +273,9 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
     user = update.message.from_user
     if not user.is_bot:
         current_menu = context.user_data.get('current_menu', '')
-        game = "ATS" if "ats" in current_menu else "ETS 2" if "ets 2" in current_menu else None
+        selected_game = context.user_data.get('selected_game', 'ATS')  # Получаем выбранную игру
 
-        if update.message.text in ["Гайды", "Моды", "Социальные сети", "Обзор актуального патча"] and game:
+        if update.message.text in ["Гайды", "Моды", "Социальные сети", "Обзор актуального патча"]:
             if update.message.text == "Гайды":
                 await show_guides(update, context)
             elif update.message.text == "Моды":
@@ -253,8 +283,8 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
             elif update.message.text == "Социальные сети":
                 await show_social(update, context)
             elif update.message.text == "Обзор актуального патча":
-                await show_patch(update, context, game)
-        elif update.message.text == "Сборки карт" and game == "ETS 2":
+                await show_patch(update, context, selected_game)
+        elif update.message.text == "Сборки карт" and selected_game == "ETS 2":
             reply_markup = create_reply_markup(map_packs_keyboard)
             await update.message.reply_text("Выберите сборку карт:", reply_markup=reply_markup)
             context.user_data['previous_menu'] = 'ets_menu'
@@ -269,6 +299,10 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
             await main_menu(update, context)
         elif update.message.text in ["Гайд для новичка", "Включить консоль и свободную камеру", "Консольные команды", "Конвой на 8+ человек"]:
             await handle_guide_selection(update, context)
+        elif update.message.text == "Таблица модов":
+            await show_mods_table(update, context)
+        elif update.message.text == "Талисман 'Шмилфа' в кабину":
+            await show_schmilfa_in_cabin(update, context)
         elif user.id in ADMIN_IDS and update.message.text == "Статистика":
             await admin_stats(update, context)
     else:
@@ -308,6 +342,7 @@ async def admin_stats(update: Update, context: CallbackContext) -> None:
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(ATS|ETS 2|Админ)$'), handle_game_selection))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Гайды|Моды|Обзор актуального патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек|Статистика|Сборки карт|Золотая сборка Русских карт)$'), handle_mods_selection))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Таблица модов|Талисман \'Шмилфа\' в кабину)$'), handle_mods_selection))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ignore_text_input))
 
 # Запуск
