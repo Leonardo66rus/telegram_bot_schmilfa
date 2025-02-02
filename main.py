@@ -1,8 +1,9 @@
 import os
 import sqlite3
 import logging
+import json
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 from dotenv import load_dotenv
 
 # Загрузка переменных окружения из файла .env
@@ -63,7 +64,7 @@ main_keyboard = [["ATS", "ETS 2"]]
 game_keyboard = [["Гайды", "Моды"], ["Обзор актуального патча", "Социальные сети"], ["Назад"]]
 ets_game_keyboard = [["Гайды", "Моды"], ["Обзор актуального патча", "Социальные сети"], ["Сборки карт"], ["Назад"]]
 map_packs_keyboard = [["Золотая сборка Русских карт"], ["Назад"]]
-admin_keyboard = [["Статистика"], ["Главное меню"]]
+admin_keyboard = [["Статистика", "Выгрузить ID пользователей", "Рассылка"], ["Главное меню"]]  # Обновленная клавиатура для администраторов
 guides_keyboard = [["Гайд для новичка"], ["Включить консоль и свободную камеру"], ["Консольные команды"], ["Конвой на 8+ человек"], ["Назад"]]
 mods_keyboard = [["Таблица модов", "Талисман 'Шмилфа' в кабину"], ["Назад"]]
 back_keyboard = [["Назад"]]
@@ -170,7 +171,6 @@ async def show_social(update: Update, context: CallbackContext) -> None:
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
-
 async def show_patch(update: Update, context: CallbackContext, game: str) -> None:
     user = update.message.from_user
     if not user.is_bot:
@@ -271,6 +271,69 @@ async def go_back(update: Update, context: CallbackContext) -> None:
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
+async def broadcast(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    if user.id in ADMIN_IDS:
+        await update.message.reply_text("Введите сообщение для рассылки:")
+        context.user_data['waiting_for_broadcast'] = True
+        context.user_data['broadcast_message'] = None
+    else:
+        await update.message.reply_text("У вас нет доступа к этой функции.")
+
+async def handle_broadcast_input(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    if user.id in ADMIN_IDS and context.user_data.get('waiting_for_broadcast'):
+        context.user_data['broadcast_message'] = update.message.text
+        keyboard = [
+            [InlineKeyboardButton("Отправить", callback_data='send_broadcast')],
+            [InlineKeyboardButton("Отменить", callback_data='cancel_broadcast')],
+            [InlineKeyboardButton("Назад", callback_data='back_from_broadcast')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(f"Проверьте ваше сообщение:\n\n{context.user_data['broadcast_message']}\n\nВыберите действие:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("Вы не в режиме ожидания для рассылки.")
+
+async def handle_broadcast_action(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    if user.id in ADMIN_IDS:
+        message = context.user_data.get('broadcast_message')
+        if message:
+            if query.data == 'send_broadcast':
+                conn, cursor = get_db_connection()
+                try:
+                    cursor.execute("SELECT user_id FROM users")
+                    user_ids = [row[0] for row in cursor.fetchall()]
+                    successful = 0
+                    failed = 0
+                    for user_id in user_ids:
+                        try:
+                            await context.bot.send_message(chat_id=user_id, text=message)
+                            successful += 1
+                        except Exception as e:
+                            logger.warning(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+                            failed += 1
+                    await query.edit_message_text(f"Рассылка завершена. Успешно отправлено: {successful}. Не удалось отправить: {failed}")
+                except Exception as e:
+                    logger.error(f"Ошибка при рассылке: {e}")
+                    await query.edit_message_text("Произошла ошибка при рассылке.")
+                finally:
+                    conn.close()
+            elif query.data == 'cancel_broadcast':
+                await query.edit_message_text("Рассылка отменена.")
+            elif query.data == 'back_from_broadcast':
+                await main_menu(update, context)
+        else:
+            await query.edit_message_text("Сообщение для рассылки не найдено.")
+    else:
+        await query.edit_message_text("У вас нет доступа к этой функции.")
+
+    # Очистим состояние, так как операция завершена
+    context.user_data['broadcast_message'] = None
+    context.user_data['waiting_for_broadcast'] = False
+
 async def handle_mods_selection(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     if not user.is_bot:
@@ -307,6 +370,10 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
             await show_schmilfa_in_cabin(update, context)
         elif user.id in ADMIN_IDS and update.message.text == "Статистика":
             await admin_stats(update, context)
+        elif user.id in ADMIN_IDS and update.message.text == "Выгрузить ID пользователей":
+            await export_user_ids(update, context)
+        elif user.id in ADMIN_IDS and update.message.text == "Рассылка":
+            await broadcast(update, context)
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
@@ -340,12 +407,31 @@ async def admin_stats(update: Update, context: CallbackContext) -> None:
     else:
         await update.message.reply_text("У вас нет доступа к этой функции.")
 
+async def export_user_ids(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    if user.id in ADMIN_IDS:
+        conn, cursor = get_db_connection()
+        try:
+            cursor.execute("SELECT user_id FROM users")
+            user_ids = [row[0] for row in cursor.fetchall()]
+            with open('user_ids.json', 'w') as json_file:
+                json.dump(user_ids, json_file)
+            await update.message.reply_text("ID пользователей выгружены в user_ids.json.")
+        except Exception as e:
+            logger.error(f"Ошибка при выгрузке ID пользователей: {e}")
+            await update.message.reply_text("Произошла ошибка при выгрузке ID пользователей.")
+        finally:
+            conn.close()
+    else:
+        await update.message.reply_text("У вас нет доступа к этой функции.")
+
 # Добавление обработчиков
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(ATS|ETS 2|Админ)$'), handle_game_selection))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Гайды|Моды|Обзор актуального патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек|Статистика|Сборки карт|Золотая сборка Русских карт)$'), handle_mods_selection))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Гайды|Моды|Обзор актуального патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек|Статистика|Сборки карт|Золотая сборка Русских карт|Выгрузить ID пользователей|Рассылка)$'), handle_mods_selection))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Таблица модов|Талисман \'Шмилфа\' в кабину)$'), handle_mods_selection))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ignore_text_input))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broadcast_input))
+application.add_handler(CallbackQueryHandler(handle_broadcast_action, pattern='^(send_broadcast|cancel_broadcast|back_from_broadcast)$'))
 
 # Запуск
 if __name__ == '__main__':
