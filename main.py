@@ -22,6 +22,7 @@ archive_critical_dir = os.path.join(log_dir, "archive_critical_errors")
 os.makedirs(log_dir, exist_ok=True)
 os.makedirs(archive_bot_dir, exist_ok=True)
 os.makedirs(archive_critical_dir, exist_ok=True)
+os.makedirs('data/guides', exist_ok=True)  # Гарантируем наличие директории для файлов
 
 # Настройка основного логгера
 logger = logging.getLogger(__name__)
@@ -81,15 +82,18 @@ def get_db_connection():
 def load_text(file_path):
     """Загрузка текста из файла с обработкой ошибок."""
     try:
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                logger.info(f"Файл {file_path} успешно загружен.")
-                return f.read().strip()  # Удаление лишних пробелов
-        logger.warning(f"Файл {file_path} не найден.")
+        absolute_path = os.path.abspath(file_path)  # Используем абсолютный путь
+        logger.info(f"Попытка загрузить файл: {absolute_path}")
+        if os.path.exists(absolute_path):
+            with open(absolute_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                logger.info(f"Файл {absolute_path} успешно загружен. Содержимое: {content[:50]}...")
+                return content
+        logger.warning(f"Файл {absolute_path} не найден.")
         return "Файл не найден."
     except Exception as e:
-        logger.error(f"Ошибка при чтении файла {file_path}: {e}")
-        critical_logger.critical(f"Критическая ошибка при чтении файла {file_path}: {e}", exc_info=True)
+        logger.error(f"Ошибка при чтении файла {absolute_path}: {e}")
+        critical_logger.critical(f"Критическая ошибка при чтении файла {absolute_path}: {e}", exc_info=True)
         return "Произошла ошибка при чтении файла."
 
 def save_user_id(user_id, cursor, conn):
@@ -116,7 +120,8 @@ guides_keyboard = [
     ["Включить консоль и свободную камеру"],
     ["Консольные команды"],
     ["Конвой на 8+ человек"],
-    ["Своё радио для ETS2 и ATS"],  # Новый пункт
+    ["Своё радио для ETS2 и ATS"],
+    ["Настройка OCULUS QUEST 2/3 для ATS и ETS2"],
     ["Назад"]
 ]
 mods_keyboard = [["Таблица модов", "Талисман 'Шмилфа' в кабину"], ["Назад"]]
@@ -255,7 +260,7 @@ async def handle_guide_selection(update: Update, context: CallbackContext) -> No
     user = update.message.from_user
     if not user.is_bot:
         topic = update.message.text
-        logger.info(f"Пользователь {user.id} выбрал гайд: {topic}")  # Отладка
+        logger.info(f"Пользователь {user.id} выбрал гайд: {topic}")
         try:
             if topic == "Конвой на 8+ человек":
                 await show_convoy_info(update, context)
@@ -265,12 +270,18 @@ async def handle_guide_selection(update: Update, context: CallbackContext) -> No
                 await update.message.reply_text(radio_text, reply_markup=reply_markup)
                 context.user_data['previous_menu'] = 'guides'
                 context.user_data['current_menu'] = 'radio'
+            elif topic == "Настройка OCULUS QUEST 2/3 для ATS и ETS2":
+                logger.info(f"Попытка загрузить oculus.txt для пользователя {user.id}")
+                oculus_text = load_text('data/guides/oculus.txt')
+                reply_markup = create_reply_markup(back_keyboard)
+                await update.message.reply_text(oculus_text, reply_markup=reply_markup)
+                context.user_data['previous_menu'] = 'guides'
+                context.user_data['current_menu'] = 'oculus'
             else:
                 file_map = {
                     "Включить консоль и свободную камеру": 'data/guides/console_on.txt',
                     "Консольные команды": 'data/guides/console_commands.txt',
-                    "Гайд для новичка": 'data/guides/guide.txt',
-                    "Своё радио для ETS2 и ATS": 'data/guides/radio.txt'
+                    "Гайд для новичка": 'data/guides/guide.txt'
                 }
                 text = load_text(file_map.get(topic, 'data/guides/guide.txt'))
                 reply_markup = create_reply_markup(back_keyboard)
@@ -287,7 +298,7 @@ async def handle_game_selection(update: Update, context: CallbackContext) -> Non
     user = update.message.from_user
     if not user.is_bot:
         game = update.message.text
-        logger.info(f"Пользователь {user.id} выбрал игру: {game}")  # Отладка
+        logger.info(f"Пользователь {user.id} выбрал игру: {game}")
         if game in ["ATS", "ETS 2"]:
             context.user_data['selected_game'] = game
             await game_menu(update, context, game)
@@ -301,11 +312,11 @@ async def go_back(update: Update, context: CallbackContext) -> None:
     if not user.is_bot:
         previous_menu = context.user_data.get('previous_menu', 'main_menu')
         current_menu = context.user_data.get('current_menu', '')
-        logger.info(f"Переход назад: текущий={current_menu}, предыдущий={previous_menu}")  # Отладка
+        logger.info(f"Переход назад: текущий={current_menu}, предыдущий={previous_menu}")
         if current_menu == 'social':
             game = context.user_data.get('selected_game', 'ATS')
             await game_menu(update, context, game)
-        elif current_menu == 'convoy' or current_menu == 'radio':  # Добавлен radio
+        elif current_menu in ['convoy', 'radio', 'oculus']:
             await show_guides(update, context)
         elif previous_menu == 'start_menu':
             await main_menu(update, context)
@@ -391,7 +402,7 @@ async def handle_broadcast_action(update: Update, context: CallbackContext) -> N
 async def handle_mods_selection(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     if not user.is_bot:
-        logger.info(f"handle_mods_selection вызвана с текстом: {update.message.text}")  # Отладка
+        logger.info(f"handle_mods_selection вызвана с текстом: {update.message.text}")
         current_menu = context.user_data.get('current_menu', '')
         selected_game = context.user_data.get('selected_game', 'ATS')
         if update.message.text in ["Гайды", "Моды", "Социальные сети", "Обзор актуального патча"]:
@@ -408,7 +419,7 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
             await update.message.reply_text("Выберите сборку карт:", reply_markup=reply_markup)
             context.user_data['previous_menu'] = 'ets_menu'
             context.user_data['current_menu'] = 'map_packs'
-        elif update.message.text == "Золотая сборка Русских карт" and context.user_data.get('current_menu', '') == 'map_packs':
+        elif update.message.text == "Золотая сборка Русских карт" and current_menu == 'map_packs':
             gold_rus_text = load_text('data/maps/gold_rus.txt')
             reply_markup = create_reply_markup(back_keyboard)
             await update.message.reply_text(gold_rus_text, reply_markup=reply_markup)
@@ -416,7 +427,7 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
             await go_back(update, context)
         elif update.message.text == "Главное меню":
             await main_menu(update, context)
-        elif update.message.text in ["Гайд для новичка", "Включить консоль и свободную камеру", "Консольные команды", "Конвой на 8+ человек", "Своё радио для ETS2 и ATS"]:
+        elif update.message.text in ["Гайд для новичка", "Включить консоль и свободную камеру", "Консольные команды", "Конвой на 8+ человек", "Своё радио для ETS2 и ATS", "Настройка OCULUS QUEST 2/3 для ATS и ETS2"]:
             await handle_guide_selection(update, context)
         elif update.message.text == "Таблица модов":
             await show_mods_table(update, context)
@@ -505,11 +516,11 @@ critical_handler.namer = critical_namer
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(ATS|ETS 2|Админ)$'), handle_game_selection))
 application.add_handler(MessageHandler(
-    filters.TEXT & filters.Regex('^(Гайды|Моды|Обзор актуального патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек|Своё радио для ETS2 и ATS|Статистика|Сборки карт|Золотая сборка Русских карт|Выгрузить ID пользователей|Рассылка)$'),
+    filters.TEXT & filters.Regex('^(Гайды|Моды|Обзор актуального патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек|Своё радио для ETS2 и ATS|Настройка OCULUS QUEST 2\/3 для ATS и ETS2|Статистика|Сборки карт|Золотая сборка Русских карт|Выгрузить ID пользователей|Рассылка)$'),
     handle_mods_selection
 ))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Таблица модов|Талисман \'Шмилфа\' в кабину)$'), handle_mods_selection))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broadcast_input))  # Перемещен вниз
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broadcast_input))
 application.add_handler(CallbackQueryHandler(handle_broadcast_action, pattern='^(send_broadcast|cancel_broadcast|back_from_broadcast)$'))
 
 # Запуск
