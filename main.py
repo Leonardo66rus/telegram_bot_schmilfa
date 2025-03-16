@@ -340,23 +340,69 @@ async def go_back(update: Update, context: CallbackContext) -> None:
 async def broadcast(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     if user.id in ADMIN_IDS:
-        await update.message.reply_text("Введите сообщение для рассылки:")
+        # Инструкция для администратора
+        instruction = (
+            "📝 **Инструкция по созданию рассылки:**\n\n"
+            "1. Вы можете отправить:\n"
+            "   - Текст с Markdown форматированием.\n"
+            "   - Фото с подписью (caption), также поддерживающей Markdown.\n\n"
+            "2. **Markdown форматирование:**\n"
+            "   - *Жирный текст*: `*жирный*`.\n"
+            "   - _Курсив_: `_курсив_`.\n"
+            "   - [Ссылка](https://example.com): `[текст](ссылка)`.\n"
+            "3. **Примеры:**\n"
+            "   - Текст с ссылкой: `Посетите [Google](https://www.google.com).`\n"
+            "   - Фото с подписью: Отправьте фото с подписью `[Google](https://www.google.com)`.\n\n"
+            "Отправьте ваше сообщение или фото с подписью:"
+        )
+
+        await update.message.reply_text(instruction, parse_mode='Markdown')
         context.user_data['waiting_for_broadcast'] = True
         context.user_data['broadcast_message'] = None
+        context.user_data['broadcast_photo'] = None
     else:
         await update.message.reply_text("У вас нет доступа к этой функции.")
 
 async def handle_broadcast_input(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     if user.id in ADMIN_IDS and context.user_data.get('waiting_for_broadcast'):
-        context.user_data['broadcast_message'] = update.message.text
+        # Проверяем, есть ли фото в сообщении
+        if update.message.photo:
+            photo_file = await update.message.photo[-1].get_file()
+            context.user_data['broadcast_photo'] = photo_file.file_id
+            logger.info(f"Фото сохранено: {photo_file.file_id}")
+
+            # Сохраняем текст под фото (caption), если он есть
+            if update.message.caption:
+                context.user_data['broadcast_message'] = update.message.caption
+                logger.info(f"Текст под фото (caption) сохранен: {update.message.caption}")
+            else:
+                context.user_data['broadcast_message'] = ""
+                logger.info("Текст под фото отсутствует.")
+        else:
+            context.user_data['broadcast_photo'] = None
+            logger.info("Фото не прикреплено.")
+
+            # Сохраняем обычный текст, если фото нет
+            if update.message.text:
+                context.user_data['broadcast_message'] = update.message.text
+                logger.info(f"Текст сообщения сохранен: {update.message.text}")
+            else:
+                context.user_data['broadcast_message'] = ""
+                logger.info("Текст сообщения отсутствует.")
+
+        # Предлагаем подтвердить отправку
         keyboard = [
             [InlineKeyboardButton("Отправить", callback_data='send_broadcast')],
             [InlineKeyboardButton("Отменить", callback_data='cancel_broadcast')],
             [InlineKeyboardButton("Назад", callback_data='back_from_broadcast')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(f"Проверьте ваше сообщение:\n\n{context.user_data['broadcast_message']}\n\nВыберите действие:", reply_markup=reply_markup)
+        await update.message.reply_text(
+            f"Проверьте ваше сообщение:\n\n{context.user_data['broadcast_message']}\n\nВыберите действие:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'  # Указываем, что текст содержит Markdown
+        )
     else:
         await update.message.reply_text("Вы не в режиме ожидания для рассылки.")
 
@@ -366,7 +412,11 @@ async def handle_broadcast_action(update: Update, context: CallbackContext) -> N
     user = query.from_user
     if user.id in ADMIN_IDS:
         message = context.user_data.get('broadcast_message')
-        if message:
+        photo = context.user_data.get('broadcast_photo')
+        logger.info(f"Сообщение для рассылки: {message}")
+        logger.info(f"Фото для рассылки: {photo}")
+
+        if message or photo:
             if query.data == 'send_broadcast':
                 conn, cursor = get_db_connection()
                 try:
@@ -376,7 +426,23 @@ async def handle_broadcast_action(update: Update, context: CallbackContext) -> N
                     failed = 0
                     for user_id in user_ids:
                         try:
-                            await context.bot.send_message(chat_id=user_id, text=message)
+                            if photo:
+                                # Отправляем фото с подписью (caption)
+                                await context.bot.send_photo(
+                                    chat_id=user_id,
+                                    photo=photo,
+                                    caption=message,
+                                    parse_mode='Markdown'  # Указываем, что текст содержит Markdown
+                                )
+                                logger.info(f"Фото отправлено пользователю {user_id}")
+                            else:
+                                # Отправляем только текст
+                                await context.bot.send_message(
+                                    chat_id=user_id,
+                                    text=message,
+                                    parse_mode='Markdown'  # Указываем, что текст содержит Markdown
+                                )
+                                logger.info(f"Текст отправлен пользователю {user_id}")
                             successful += 1
                         except Exception as e:
                             logger.warning(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
@@ -397,6 +463,7 @@ async def handle_broadcast_action(update: Update, context: CallbackContext) -> N
     else:
         await query.edit_message_text("У вас нет доступа к этой функции.")
     context.user_data['broadcast_message'] = None
+    context.user_data['broadcast_photo'] = None
     context.user_data['waiting_for_broadcast'] = False
 
 async def handle_mods_selection(update: Update, context: CallbackContext) -> None:
@@ -520,6 +587,7 @@ application.add_handler(MessageHandler(
     handle_mods_selection
 ))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Таблица модов|Талисман \'Шмилфа\' в кабину)$'), handle_mods_selection))
+application.add_handler(MessageHandler(filters.PHOTO, handle_broadcast_input))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broadcast_input))
 application.add_handler(CallbackQueryHandler(handle_broadcast_action, pattern='^(send_broadcast|cancel_broadcast|back_from_broadcast)$'))
 
