@@ -169,9 +169,8 @@ async def show_mods(update: Update, context: CallbackContext) -> None:
 async def show_mods_table(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     if not user.is_bot:
-        mods_table_text = load_text('data/mods/mods_table.txt')
-        mods_link_button = InlineKeyboardMarkup([[InlineKeyboardButton("Ссылка на моды", url="https://clck.ru/Xxs42")]])
-        await update.message.reply_text(mods_table_text, reply_markup=mods_link_button)
+        mods_table_text = load_text('data/mods/mods_table.md')
+        await update.message.reply_text(mods_table_text, parse_mode='Markdown')
         context.user_data['previous_menu'] = 'mods'
         context.user_data['current_menu'] = 'mods_table'
     else:
@@ -181,10 +180,10 @@ async def show_schmilfa_in_cabin(update: Update, context: CallbackContext) -> No
     user = update.message.from_user
     if not user.is_bot:
         selected_game = context.user_data.get('selected_game', 'ATS')  # По умолчанию ATS
-        schmilfa_file = f'data/mods/schmilfa_in_cabin_{selected_game.lower()}.txt'
+        schmilfa_file = f'data/mods/schmilfa_in_cabin_{selected_game.lower()}.md'  # Изменяем расширение на .md
         schmilfa_text = load_text(schmilfa_file)
         reply_markup = create_reply_markup(back_keyboard)
-        await update.message.reply_text(schmilfa_text, reply_markup=reply_markup)
+        await update.message.reply_text(schmilfa_text, reply_markup=reply_markup, parse_mode='Markdown')  # Указываем parse_mode
         context.user_data['previous_menu'] = 'mods'
         context.user_data['current_menu'] = 'schmilfa_in_cabin'
     else:
@@ -221,25 +220,14 @@ async def show_social(update: Update, context: CallbackContext) -> None:
 async def show_patch(update: Update, context: CallbackContext, game: str) -> None:
     user = update.message.from_user
     if not user.is_bot:
-        patch_file = f'data/patches/patch_{game.lower()}.txt'
+        patch_file = f'data/patches/patch_{game.lower()}.md'
         patch_text = load_text(patch_file)
         if "Файл не найден." in patch_text or "Произошла ошибка" in patch_text:
             patch_text = f"Обзор актуального патча для {game} не найден."
         reply_markup = create_reply_markup(back_keyboard)
-        await update.message.reply_text(patch_text, reply_markup=reply_markup)
+        await update.message.reply_text(patch_text, reply_markup=reply_markup, parse_mode='Markdown')  # Используем Markdown
         context.user_data['previous_menu'] = context.user_data.get('current_menu', 'game_menu')
         context.user_data['current_menu'] = f'{game.lower()}_patch'
-    else:
-        await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
-
-async def show_convoy_info(update: Update, context: CallbackContext) -> None:
-    user = update.message.from_user
-    if not user.is_bot:
-        convoy_text = load_text('data/guides/convoy_8plus.txt')
-        reply_markup = create_reply_markup(back_keyboard)
-        await update.message.reply_text(convoy_text, reply_markup=reply_markup)
-        context.user_data['previous_menu'] = 'guides'
-        context.user_data['current_menu'] = 'convoy'
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
@@ -262,35 +250,47 @@ async def handle_guide_selection(update: Update, context: CallbackContext) -> No
         topic = update.message.text
         logger.info(f"Пользователь {user.id} выбрал гайд: {topic}")
         try:
-            if topic == "Конвой на 8+ человек":
-                await show_convoy_info(update, context)
-            elif topic == "Своё радио для ETS2 и ATS":
-                radio_text = load_text('data/guides/radio.txt')
-                reply_markup = create_reply_markup(back_keyboard)
-                await update.message.reply_text(radio_text, reply_markup=reply_markup)
-                context.user_data['previous_menu'] = 'guides'
-                context.user_data['current_menu'] = 'radio'
-            elif topic == "Настройка OCULUS QUEST 2/3 для ATS и ETS2":
-                logger.info(f"Попытка загрузить oculus.txt для пользователя {user.id}")
-                oculus_text = load_text('data/guides/oculus.txt')
-                reply_markup = create_reply_markup(back_keyboard)
-                await update.message.reply_text(oculus_text, reply_markup=reply_markup)
-                context.user_data['previous_menu'] = 'guides'
-                context.user_data['current_menu'] = 'oculus'
-            else:
-                file_map = {
-                    "Включить консоль и свободную камеру": 'data/guides/console_on.txt',
-                    "Консольные команды": 'data/guides/console_commands.txt',
-                    "Гайд для новичка": 'data/guides/guide.txt'
-                }
-                text = load_text(file_map.get(topic, 'data/guides/guide.txt'))
-                reply_markup = create_reply_markup(back_keyboard)
-                await update.message.reply_text(text, reply_markup=reply_markup)
-                context.user_data['previous_menu'] = 'guides'
-                context.user_data['current_menu'] = 'guide'
+            # Словарь для сопоставления названий гайдов с файлами
+            guide_files = {
+                "Гайд для новичка": "guide.md",
+                "Включить консоль и свободную камеру": "console_on.md",
+                "Консольные команды": "console_commands.md",
+                "Конвой на 8+ человек": "convoy_8plus.md",
+                "Своё радио для ETS2 и ATS": "radio.md",
+                "Настройка OCULUS QUEST 2/3 для ATS и ETS2": "oculus.md"
+            }
+            guide_filename = guide_files.get(topic, "guide.md")  # По умолчанию "guide.md"
+            guide_file = f'data/guides/{guide_filename}'
+            guide_text = load_text(guide_file)
+            if "Файл не найден." in guide_text or "Произошла ошибка" in guide_text:
+                guide_text = f"Гайд '{topic}' не найден."
+            reply_markup = create_reply_markup(back_keyboard)
+            await update.message.reply_text(guide_text, reply_markup=reply_markup, parse_mode='Markdown')
+            context.user_data['previous_menu'] = 'guides'
+            context.user_data['current_menu'] = guide_filename.split('.')[0]  # Например, 'convoy_8plus'
         except Exception as e:
             logger.error(f"Ошибка в handle_guide_selection: {e}")
             await update.message.reply_text("Произошла ошибка, попробуйте позже.")
+    else:
+        await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
+
+async def show_map_pack(update: Update, context: CallbackContext, map_pack: str) -> None:
+    user = update.message.from_user
+    if not user.is_bot:
+        # Словарь для сопоставления названий сборок с файлами
+        map_files = {
+            "Золотая сборка Русских карт": "gold_rus.md",
+            # Добавьте другие сборки здесь, если нужно
+        }
+        map_filename = map_files.get(map_pack, "unknown_map.md")
+        map_file = f'data/maps/{map_filename}'
+        map_text = load_text(map_file)
+        if "Файл не найден." in map_text or "Произошла ошибка" in map_text:
+            map_text = f"Информация о сборке карт '{map_pack}' не найдена."
+        reply_markup = create_reply_markup(back_keyboard)
+        await update.message.reply_text(map_text, reply_markup=reply_markup, parse_mode='Markdown')  # Используем Markdown
+        context.user_data['previous_menu'] = 'map_packs'
+        context.user_data['current_menu'] = f'{map_pack.lower().replace(" ", "_")}_map'
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
@@ -316,7 +316,7 @@ async def go_back(update: Update, context: CallbackContext) -> None:
         if current_menu == 'social':
             game = context.user_data.get('selected_game', 'ATS')
             await game_menu(update, context, game)
-        elif current_menu in ['convoy', 'radio', 'oculus']:
+        elif current_menu in ['guide', 'console_on', 'console_commands', 'convoy_8plus', 'radio', 'oculus']:  # Обновляем список
             await show_guides(update, context)
         elif previous_menu == 'start_menu':
             await main_menu(update, context)
@@ -327,7 +327,7 @@ async def go_back(update: Update, context: CallbackContext) -> None:
             await game_menu(update, context, game)
         elif current_menu == 'admin_menu':
             await main_menu(update, context)
-        elif current_menu == 'map_packs':
+        elif current_menu == 'map_packs' or 'map' in current_menu:
             await game_menu(update, context, 'ETS 2')
         else:
             await show_guides(update, context) if previous_menu == 'guides' else \
@@ -487,9 +487,7 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
             context.user_data['previous_menu'] = 'ets_menu'
             context.user_data['current_menu'] = 'map_packs'
         elif update.message.text == "Золотая сборка Русских карт" and current_menu == 'map_packs':
-            gold_rus_text = load_text('data/maps/gold_rus.txt')
-            reply_markup = create_reply_markup(back_keyboard)
-            await update.message.reply_text(gold_rus_text, reply_markup=reply_markup)
+            await show_map_pack(update, context, "Золотая сборка Русских карт")
         elif update.message.text == "Назад":
             await go_back(update, context)
         elif update.message.text == "Главное меню":
