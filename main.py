@@ -71,6 +71,20 @@ def get_db_connection():
                           (id INTEGER PRIMARY KEY AUTOINCREMENT,
                            title TEXT UNIQUE,
                            content TEXT)''')
+        # Добавляем таблицы для системы вопросов
+        cursor.execute('''CREATE TABLE IF NOT EXISTS questions
+                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                           user_id INTEGER NOT NULL,
+                           question_text TEXT NOT NULL,
+                           status TEXT DEFAULT 'open',
+                           admin_id INTEGER,
+                           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS question_messages
+                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                           question_id INTEGER NOT NULL,
+                           sender_id INTEGER NOT NULL,
+                           message_text TEXT NOT NULL,
+                           sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         conn.commit()
         logger.info("Соединение с базой данных успешно установлено.")
         return conn, cursor
@@ -110,11 +124,15 @@ def create_reply_markup(keyboard):
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False, selective=False)
 
 # Оптимизация клавиатур для постоянного отображения
-main_keyboard = [["ATS", "ETS 2"]]
+main_keyboard = [["ATS", "ETS 2"], ["Задать вопрос"]]
 game_keyboard = [["Гайды", "Моды"], ["Обзор актуального патча", "Социальные сети"], ["Назад"]]
 ets_game_keyboard = [["Гайды", "Моды"], ["Обзор актуального патча", "Социальные сети"], ["Сборки карт"], ["Назад"]]
 map_packs_keyboard = [["Золотая сборка Русских карт"], ["Назад"]]
-admin_keyboard = [["Статистика", "Выгрузить ID пользователей", "Рассылка"], ["Главное меню"]]
+admin_keyboard = [
+    ["Статистика", "Выгрузить ID пользователей"],
+    ["Рассылка", "Вопросы"],
+    ["Главное меню"]
+]
 guides_keyboard = [
     ["Гайд для новичка"],
     ["Включить консоль и свободную камеру"],
@@ -124,7 +142,7 @@ guides_keyboard = [
     ["Настройка OCULUS QUEST 2/3 для ATS и ETS2"],
     ["Назад"]
 ]
-mods_keyboard = [["Таблица модов", "Талисман 'Шмилфа' в кабину"], ["Назад"]]
+mods_keyboard = [["Таблица модов", "Талисман 'Шмилфа' в кабину"], ["Иммерсивные моды"], ["Назад"]]
 back_keyboard = [["Назад"]]
 
 async def main_menu(update: Update, context: CallbackContext) -> None:
@@ -188,6 +206,17 @@ async def show_schmilfa_in_cabin(update: Update, context: CallbackContext) -> No
         context.user_data['current_menu'] = 'schmilfa_in_cabin'
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
+
+async def show_immersive_mods(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    if not user.is_bot:
+        selected_game = context.user_data.get('selected_game', 'ATS')  # По умолчанию ATS
+        immersive_file = f'data/mods/immersive_mods_{selected_game.lower()}.md'
+        immersive_text = load_text(immersive_file)
+        reply_markup = create_reply_markup(back_keyboard)
+        await update.message.reply_text(immersive_text, reply_markup=reply_markup, parse_mode='Markdown')
+        context.user_data['previous_menu'] = 'mods'
+        context.user_data['current_menu'] = 'immersive_mods'
 
 async def show_guides(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
@@ -298,12 +327,14 @@ async def handle_game_selection(update: Update, context: CallbackContext) -> Non
     user = update.message.from_user
     if not user.is_bot:
         game = update.message.text
-        logger.info(f"Пользователь {user.id} выбрал игру: {game}")
+        logger.info(f"Пользователь {user.id} выбрал: {game}")
         if game in ["ATS", "ETS 2"]:
             context.user_data['selected_game'] = game
             await game_menu(update, context, game)
         elif user.id in ADMIN_IDS and game == "Админ":
             await admin_menu(update, context)
+        elif game == "Задать вопрос":  # Переносим логику сюда для ясности
+            await ask_question(update, context)
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
@@ -365,6 +396,8 @@ async def broadcast(update: Update, context: CallbackContext) -> None:
 
 async def handle_broadcast_input(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
+
+    # Проверяем, что это админ и находится в режиме ожидания рассылки
     if user.id in ADMIN_IDS and context.user_data.get('waiting_for_broadcast'):
         # Проверяем, есть ли фото в сообщении
         if update.message.photo:
@@ -401,10 +434,11 @@ async def handle_broadcast_input(update: Update, context: CallbackContext) -> No
         await update.message.reply_text(
             f"Проверьте ваше сообщение:\n\n{context.user_data['broadcast_message']}\n\nВыберите действие:",
             reply_markup=reply_markup,
-            parse_mode='Markdown'  # Указываем, что текст содержит Markdown
+            parse_mode='Markdown'
         )
+    # Если это не рассылка, передаем управление дальше
     else:
-        await update.message.reply_text("Вы не в режиме ожидания для рассылки.")
+        await handle_question_input(update, context)
 
 async def handle_broadcast_action(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -504,13 +538,19 @@ async def handle_mods_selection(update: Update, context: CallbackContext) -> Non
             await export_user_ids(update, context)
         elif user.id in ADMIN_IDS and update.message.text == "Рассылка":
             await broadcast(update, context)
+        elif update.message.text == "Иммерсивные моды":
+            await show_immersive_mods(update, context)
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
+# Убедимся, что ignore_text_input возвращает управление в меню
 async def ignore_text_input(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     if not user.is_bot:
-        await update.message.reply_text("Пожалуйста, используйте кнопки меню для навигации.", reply_markup=create_reply_markup(back_keyboard))
+        await update.message.reply_text(
+            "Пожалуйста, используйте кнопки меню для навигации.",
+            reply_markup=create_reply_markup(back_keyboard)
+        )
     else:
         await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
 
@@ -577,17 +617,432 @@ def critical_namer(default_name):
 bot_handler.namer = bot_namer
 critical_handler.namer = critical_namer
 
-# Добавление обработчиков
+async def ask_question(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    logger.info(f"Пользователь {user.id} начал процесс задавания вопроса")
+    context.user_data['awaiting_question'] = True
+    await update.message.reply_text("Введите ваш вопрос:")
+    context.user_data['previous_menu'] = 'main_menu'
+    context.user_data['current_menu'] = 'ask_question'
+    logger.debug(f"Для пользователя {user.id} установлен флаг awaiting_question")
+
+async def handle_question_input(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    if not user.is_bot:
+        # Если пользователь в режиме ожидания вопроса
+        if context.user_data.get('awaiting_question'):
+            question_text = update.message.text
+            logger.info(f"Получен вопрос от пользователя {user.id}: {question_text}")
+
+            try:
+                conn, cursor = get_db_connection()
+                logger.debug("Установлено соединение с БД для сохранения вопроса")
+
+                cursor.execute(
+                    "INSERT INTO questions (user_id, question_text, status) VALUES (?, ?, 'open')",
+                    (user.id, question_text)
+                )
+                question_id = cursor.lastrowid
+                conn.commit()
+                logger.info(f"Вопрос сохранен в БД с ID {question_id}")
+
+                await update.message.reply_text(
+                    "✅ Ваш вопрос отправлен администратору. С вами свяжутся в ближайшее время."
+                )
+                logger.debug("Пользователь получил подтверждение")
+
+                await main_menu(update, context)
+                logger.debug("Пользователь возвращен в главное меню")
+
+                admin_count = 0
+                for admin_id in ADMIN_IDS:
+                    try:
+                        keyboard = [
+                            [InlineKeyboardButton("Ответить", callback_data=f"answer_{question_id}")],
+                            [InlineKeyboardButton("Закрыть", callback_data=f"close_{question_id}")]
+                        ]
+                        await context.bot.send_message(
+                            admin_id,
+                            f"📩 Новый вопрос #{question_id} от @{user.username or user.id}:\n\n{question_text}",
+                            reply_markup=InlineKeyboardMarkup(keyboard)
+                        )
+                        admin_count += 1
+                        logger.debug(f"Уведомление отправлено администратору {admin_id}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при уведомлении админа {admin_id}: {str(e)}")
+
+                logger.info(f"Всего уведомлено {admin_count} администраторов из {len(ADMIN_IDS)}")
+
+            except Exception as e:
+                logger.error(f"Ошибка при обработке вопроса: {str(e)}")
+                await update.message.reply_text("⚠️ Произошла ошибка при обработке вопроса. Пожалуйста, попробуйте позже.")
+            finally:
+                if 'conn' in locals():
+                    conn.close()
+                context.user_data.pop('awaiting_question', None)
+                logger.debug("Флаг awaiting_question сброшен")
+
+        # Если админ в диалоге
+        elif 'active_question' in context.user_data:
+            question_id = context.user_data['active_question']
+            conn, cursor = get_db_connection()
+            try:
+                cursor.execute("SELECT user_id, status FROM questions WHERE id = ?", (question_id,))
+                result = cursor.fetchone()
+                if result:
+                    user_id, status = result
+                    logger.debug(f"Статус вопроса ID {question_id}: {status}")
+                    if status == 'in_progress':
+                        cursor.execute(
+                            "INSERT INTO question_messages (question_id, sender_id, message_text) VALUES (?, ?, ?)",
+                            (question_id, user.id, update.message.text)
+                        )
+                        conn.commit()
+
+                        await context.bot.send_message(
+                            user_id,
+                            f"Администратор: {update.message.text}"
+                        )
+                    else:
+                        await update.message.reply_text("Диалог завершен. Вы не можете отправлять сообщения.")
+                else:
+                    await update.message.reply_text("Вопрос не найден.")
+            except Exception as e:
+                logger.error(f"Ошибка в диалоге админа: {e}")
+                await update.message.reply_text("Произошла ошибка.")
+            finally:
+                conn.close()
+
+        # Если пользователь отправляет сообщение
+        else:
+            conn, cursor = get_db_connection()
+            try:
+                cursor.execute(
+                    "SELECT id, admin_id, status FROM questions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                    (user.id,)
+                )
+                question = cursor.fetchone()
+                if question:
+                    question_id, admin_id, status = question
+                    logger.debug(f"Последний вопрос пользователя {user.id}: ID {question_id}, статус {status}")
+                    if status == 'in_progress':
+                        cursor.execute(
+                            "INSERT INTO question_messages (question_id, sender_id, message_text) VALUES (?, ?, ?)",
+                            (question_id, user.id, update.message.text)
+                        )
+                        conn.commit()
+
+                        await context.bot.send_message(
+                            admin_id,
+                            f"Пользователь {user.id}: {update.message.text}"
+                        )
+                    else:
+                        await update.message.reply_text(
+                            "Диалог по вашему вопросу завершен или еще не начат. "
+                            "Если у вас есть новый вопрос, выберите 'Задать вопрос' в меню.",
+                            reply_markup=create_reply_markup(main_keyboard)
+                        )
+                else:
+                    await update.message.reply_text(
+                        "У вас нет активных вопросов. Используйте кнопки меню для навигации.",
+                        reply_markup=create_reply_markup(main_keyboard)
+                    )
+            except Exception as e:
+                logger.error(f"Ошибка при обработке сообщения пользователя: {e}")
+                await update.message.reply_text("Произошла ошибка.")
+            finally:
+                conn.close()
+    else:
+        await update.message.reply_text("Извините, боты не могут использовать эту функцию.")
+
+async def handle_dialog_message(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    message_text = update.message.text
+
+    # Если сообщение от админа в диалоге
+    if 'active_question' in context.user_data:
+        question_id = context.user_data['active_question']
+        conn, cursor = get_db_connection()
+        cursor.execute("SELECT user_id FROM questions WHERE id = ?", (question_id,))
+        user_id = cursor.fetchone()[0]
+
+        # Сохраняем сообщение в БД
+        cursor.execute(
+            "INSERT INTO question_messages (question_id, sender_id, message_text) VALUES (?, ?, ?)",
+            (question_id, user.id, message_text)
+        )
+        conn.commit()
+
+        # Пересылаем пользователю
+        await context.bot.send_message(
+            user_id,
+            f"Администратор: {message_text}"
+        )
+
+    # Если сообщение от пользователя в открытом вопросе
+    else:
+        conn, cursor = get_db_connection()
+        cursor.execute(
+            "SELECT id, admin_id FROM questions WHERE user_id = ? AND status = 'in_progress'",
+            (user.id,)
+        )
+        question = cursor.fetchone()
+        if question:
+            question_id, admin_id = question
+            # Сохраняем сообщение
+            cursor.execute(
+                "INSERT INTO question_messages (question_id, sender_id, message_text) VALUES (?, ?, ?)",
+                (question_id, user.id, message_text)
+            )
+            conn.commit()
+
+            # Пересылаем админу
+            await context.bot.send_message(
+                admin_id,
+                f"Пользователь {user.id}: {message_text}"
+            )
+
+async def end_dialog(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+
+    if 'active_question' in context.user_data:  # Если это админ
+        question_id = context.user_data.pop('active_question')
+        conn, cursor = get_db_connection()
+        try:
+            # Обновляем статус вопроса на "closed"
+            cursor.execute("UPDATE questions SET status = 'closed' WHERE id = ?", (question_id,))
+            cursor.execute("SELECT user_id FROM questions WHERE id = ?", (question_id,))
+            result = cursor.fetchone()
+            if result:
+                user_id = result[0]
+                conn.commit()
+
+                await update.message.reply_text("Диалог завершен. Вы вернулись в обычный режим.")
+                # Уведомляем пользователя
+                await context.bot.send_message(
+                    user_id,
+                    "ℹ️ Администратор завершил диалог по вашему вопросу.\n"
+                    "Если у вас остались вопросы, вы можете задать новый.",
+                    reply_markup=create_reply_markup(main_keyboard)
+                )
+            else:
+                await update.message.reply_text("Вопрос не найден.")
+        except Exception as e:
+            logger.error(f"Ошибка при завершении диалога: {e}")
+            await update.message.reply_text("Произошла ошибка при завершении диалога.")
+        finally:
+            conn.close()
+
+    else:  # Если это пользователь
+        conn, cursor = get_db_connection()
+        try:
+            cursor.execute(
+                "SELECT id, admin_id, status FROM questions WHERE user_id = ? AND status = 'in_progress'",
+                (user.id,)
+            )
+            question = cursor.fetchone()
+            if question:
+                question_id, admin_id, status = question
+                cursor.execute(
+                    "UPDATE questions SET status = 'closed' WHERE id = ?",
+                    (question_id,)
+                )
+                conn.commit()
+                await update.message.reply_text(
+                    "Диалог с администратором завершен.\n"
+                    "Вы можете продолжать пользоваться ботом или задать новый вопрос.",
+                    reply_markup=create_reply_markup(main_keyboard)
+                )
+                # Уведомляем администратора
+                await context.bot.send_message(
+                    admin_id,
+                    f"Пользователь {user.id} завершил диалог по вопросу ID {question_id}."
+                )
+            else:
+                await update.message.reply_text(
+                    "У вас нет активного диалога.",
+                    reply_markup=create_reply_markup(main_keyboard)
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при завершении диалога пользователем: {e}")
+            await update.message.reply_text("Произошла ошибка при завершении диалога.")
+        finally:
+            conn.close()
+
+async def handle_admin_action(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    admin_id = query.from_user.id
+
+    logger.info(f"Получен callback_data: {data}")
+
+    # Разделяем callback_data и проверяем формат
+    try:
+        parts = data.split("_")
+        if len(parts) < 2:
+            raise ValueError("Недостаточно частей в callback_data")
+
+        action = parts[0]
+        question_id = int(parts[-1])
+    except (ValueError, IndexError) as e:
+        await query.edit_message_text("Ошибка: некорректный запрос. Попробуйте снова.")
+        logger.error(f"Некорректный callback_data: {data}, ошибка: {str(e)}")
+        return
+
+    if action == "answer":
+        conn, cursor = get_db_connection()
+        try:
+            cursor.execute("SELECT user_id, question_text FROM questions WHERE id = ?", (question_id,))
+            question = cursor.fetchone()
+
+            if question:
+                user_id, question_text = question
+                cursor.execute(
+                    "UPDATE questions SET status = 'in_progress', admin_id = ? WHERE id = ?",
+                    (admin_id, question_id)
+                )
+                conn.commit()
+
+                await context.bot.send_message(
+                    user_id,
+                    "🛎 Администратор начал работу по вашему вопросу!\n\n"
+                    f"Ваш вопрос: {question_text}\n\n"
+                    "Теперь вы можете общаться напрямую. Чтобы завершить диалог, отправьте /end_dialog"
+                )
+
+                context.user_data['active_question'] = question_id
+                keyboard = [
+                    [InlineKeyboardButton("Завершить диалог", callback_data=f"end_dialog_{question_id}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(
+                    f"Вы в диалоге по вопросу ID {question_id} с пользователем {user_id}.\n\n"
+                    "Отправляйте сообщения для пользователя.",
+                    reply_markup=reply_markup
+                )
+            else:
+                await query.edit_message_text("Вопрос не найден.")
+        except Exception as e:
+            logger.error(f"Ошибка при начале диалога: {e}")
+            await query.edit_message_text("Произошла ошибка.")
+        finally:
+            conn.close()
+
+    elif action == "close":
+        conn, cursor = get_db_connection()
+        try:
+            cursor.execute(
+                "UPDATE questions SET status = 'closed' WHERE id = ?",
+                (question_id,)
+            )
+            cursor.execute("SELECT user_id FROM questions WHERE id = ?", (question_id,))
+            result = cursor.fetchone()
+            if result:
+                user_id = result[0]
+                conn.commit()
+                await query.edit_message_text(f"❌ Вопрос ID {question_id} закрыт.")
+                await context.bot.send_message(
+                    user_id,
+                    "Ваш вопрос был закрыт администратором."
+                )
+            else:
+                await query.edit_message_text("Вопрос не найден.")
+        except Exception as e:
+            logger.error(f"Ошибка при закрытии вопроса: {e}")
+            await query.edit_message_text("Произошла ошибка.")
+        finally:
+            conn.close()
+
+    elif action == "end":
+        if 'active_question' in context.user_data and context.user_data['active_question'] == question_id:
+            conn, cursor = get_db_connection()
+            try:
+                cursor.execute("UPDATE questions SET status = 'closed' WHERE id = ?", (question_id,))
+                cursor.execute("SELECT user_id FROM questions WHERE id = ?", (question_id,))
+                result = cursor.fetchone()
+                if result:
+                    user_id = result[0]
+                    conn.commit()
+
+                    await query.edit_message_text("Диалог завершен. Вы вернулись в обычный режим.")
+                    await context.bot.send_message(
+                        user_id,
+                        "ℹ️ Администратор завершил диалог по вашему вопросу.\n"
+                        "Если у вас остались вопросы, вы можете задать новый.",
+                        reply_markup=create_reply_markup(main_keyboard)
+                    )
+                    context.user_data.pop('active_question', None)
+                else:
+                    await query.edit_message_text("Вопрос не найден.")
+            except Exception as e:
+                logger.error(f"Ошибка при завершении диалога: {e}")
+                await query.edit_message_text("Произошла ошибка при завершении диалога.")
+            finally:
+                conn.close()
+        else:
+            await query.edit_message_text("Вы не в активном диалоге с этим вопросом.")
+
+async def show_questions(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    if user.id in ADMIN_IDS:
+        conn, cursor = get_db_connection()
+        try:
+            cursor.execute("SELECT id, user_id, question_text FROM questions WHERE status != 'closed'")
+            questions = cursor.fetchall()
+
+            if not questions:
+                await update.message.reply_text("Нет активных вопросов.")
+                return
+
+            # Отправляем отдельное сообщение для каждого вопроса с кнопками
+            for q_id, u_id, q_text in questions:
+                keyboard = [
+                    [InlineKeyboardButton("Ответить", callback_data=f"answer_{q_id}")],
+                    [InlineKeyboardButton("Закрыть", callback_data=f"close_{q_id}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(
+                    f"Вопрос ID: {q_id}\n"
+                    f"Пользователь: {u_id}\n"
+                    f"Текст: {q_text}",
+                    reply_markup=reply_markup
+                )
+            await update.message.reply_text(
+                "Выберите вопрос для обработки или вернитесь в меню.",
+                reply_markup=create_reply_markup([["Главное меню"]])
+            )
+
+        except Exception as e:
+            logger.error(f"Ошибка при отображении вопросов: {e}")
+            await update.message.reply_text("Произошла ошибка при загрузке вопросов.")
+        finally:
+            conn.close()
+    else:
+        await update.message.reply_text("У вас нет доступа к этой функции.")
+
+# Обновленная секция обработчиков
 application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(ATS|ETS 2|Админ)$'), handle_game_selection))
+application.add_handler(CommandHandler("end_dialog", end_dialog))
+
+# Обработчики меню
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^(ATS|ETS 2|Админ)$'), handle_game_selection))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^Задать вопрос$'), ask_question))
+application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^Вопросы$'), show_questions))
 application.add_handler(MessageHandler(
-    filters.TEXT & filters.Regex('^(Гайды|Моды|Обзор актуального патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек|Своё радио для ETS2 и ATS|Настройка OCULUS QUEST 2\/3 для ATS и ETS2|Статистика|Сборки карт|Золотая сборка Русских карт|Выгрузить ID пользователей|Рассылка)$'),
+    filters.TEXT & filters.Regex(r'^(Гайды|Моды|Иммерсивные моды|Обзор актуального патча|Социальные сети|Главное меню|Назад|Гайд для новичка|Включить консоль и свободную камеру|Консольные команды|Конвой на 8\+ человек|Своё радио для ETS2 и ATS|Настройка OCULUS QUEST 2/3 для ATS и ETS2|Статистика|Сборки карт|Золотая сборка Русских карт|Выгрузить ID пользователей|Рассылка|Таблица модов|Талисман \'Шмилфа\' в кабину)$'),
     handle_mods_selection
 ))
-application.add_handler(MessageHandler(filters.TEXT & filters.Regex('^(Таблица модов|Талисман \'Шмилфа\' в кабину)$'), handle_mods_selection))
-application.add_handler(MessageHandler(filters.PHOTO, handle_broadcast_input))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broadcast_input))
-application.add_handler(CallbackQueryHandler(handle_broadcast_action, pattern='^(send_broadcast|cancel_broadcast|back_from_broadcast)$'))
+
+# Обработчики рассылки (перемещаем выше handle_question_input)
+application.add_handler(MessageHandler(filters.PHOTO | (filters.TEXT & ~filters.COMMAND), handle_broadcast_input))
+
+# Обработчик вопросов и диалогов (после рассылки)
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_question_input))
+
+# Обработчики callback-запросов
+application.add_handler(CallbackQueryHandler(handle_admin_action, pattern=r'^(answer|close|end_dialog)_\d+$'))
+application.add_handler(CallbackQueryHandler(handle_broadcast_action, pattern=r'^(send_broadcast|cancel_broadcast|back_from_broadcast)$'))
 
 # Запуск
 if __name__ == '__main__':
